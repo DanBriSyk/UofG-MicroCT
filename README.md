@@ -26,10 +26,10 @@ This repository may contain:
 
 1.  **Clone the Repository:**
     ```bash
-    git clone [https://github.com/your-github-username/microct-glasgow-code.git](https://www.google.com/search?q=https://github.com/your-github-username/microct-glasgow-code.git)
-    cd microct-glasgow-code
+    git clone [https://github.com/your-github-username/UofG-MicroCT.git](https://www.google.com/search?q=https://github.com/your-github-username/UofG-MicroCT.git)
+    cd UofG-MicroCT
     ```
-    (Replace `your-github-username/microct-glasgow-code` with the actual repository URL.)
+    (Replace `your-github-username/UofG-MicroCT` with the actual repository URL.)
 
 2.  **Explore the Folders:** Browse the repository to find relevant code and documentation.
 
@@ -76,7 +76,7 @@ If you encounter any issues or have suggestions for improvements, please open an
 
 ## License
 
-This repository is licensed under the [Specify your license here, e.g., MIT License].
+This repository is licensed under the GNU GPL-3.0 license.
 
 ## Contact
 
