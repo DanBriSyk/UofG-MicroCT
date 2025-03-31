@@ -26,10 +26,10 @@ This repository may contain:
 
 1.  **Clone the Repository:**
     ```bash
-    git clone [https://github.com/your-github-username/UofG-MicroCT.git](https://www.google.com/search?q=https://github.com/your-github-username/UofG-MicroCT.git)
+    git clone https://github.com/<<<your-github-account>>>/UofG-MicroCT.git
     cd UofG-MicroCT
     ```
-    (Replace `your-github-username/UofG-MicroCT` with the actual repository URL.)
+    (Replace `<<<your-github-account>>>` with your account name.)
 
 2.  **Explore the Folders:** Browse the repository to find relevant code and documentation.
 
