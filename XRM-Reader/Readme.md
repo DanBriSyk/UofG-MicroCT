@@ -48,7 +48,7 @@ This Python script provides a graphical user interface (GUI) for batch convertin
     python xrm_converter.py
     ```
 
-.  **Use the GUI:**
+2.  **Use the GUI:**
 
     -   Click the "Select Files or Directory" button.
     -   A dialog will prompt you to choose between selecting files or a directory.
