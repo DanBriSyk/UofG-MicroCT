@@ -25,7 +25,7 @@ This Python script provides a graphical user interface (GUI) for batch convertin
 1.  **Clone the repository (or download the script):**
 
     ```bash
-    git clone https://github.com/DanBriSyk/UofG-MicroCT
+    git clone https://github.com/DanBriSyk/UofG-MicroCT.git
     ```
 
     Or download the `xrm_converter.py` file directly.
