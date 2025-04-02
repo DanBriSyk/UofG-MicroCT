@@ -15,7 +15,7 @@ This repository aims to:
 
 This repository may contain:
 
-* **Python Scripts:** For data import, preprocessing, analysis, and visualization.
+* **Python Scripts:** For data import, preprocessing, analysis, visualization and machine learning.
 * **ImageJ/Fiji Macros:** For common image processing tasks.
 * **R Scripts:** For statistical analysis and data visualization.
 * **MATLAB Scripts:** For custom data processing and analysis.
@@ -65,9 +65,8 @@ We encourage all users to contribute to this repository. To contribute:
 
 * **Documentation:** Please provide clear and concise documentation for your code.
 * **Code Style:** Follow consistent coding style guidelines (e.g., PEP 8 for Python).
-* **Testing:** Include unit tests or example usage to ensure your code works correctly.
-* **Licensing:** Ensure your code is appropriately licensed (e.g., MIT, GPL).
-* **Folder Structure:** Try to keep files organized within relevant folders.
+* **Testing:** Try to include unit tests or example usage to ensure your code works correctly.
+* **Folder Structure:** Keep files organized within relevant folders, i.e. one folder per code/project.
 * **Readme Files:** Include README files within relevant folders explaining the folder content and the contained code.
 
 ## Issues
