@@ -1,24 +1,28 @@
-# XRM to TIFF/BMP Converter
+# XRM to TIFF/PNG Converter
 
-This Python script provides a graphical user interface (GUI) for batch converting XRM files (a proprietary microscopy data format) to TIFF or BMP image formats. It recursively searches a user-specified directory for XRM files, extracts image data, and saves the converted images in the same directory as the source XRM files.
+This Python script provides a graphical user interface (GUI) for batch converting XRM files (ZEISS proprietary microscopy data format) to TIFF or PNG image formats. It recursively searches a user-specified directory for XRM files, extracts image data, and saves the converted images in the same directory as the source XRM files.
 
 ## Features
 
--   **User-friendly GUI:** Simple and intuitive interface for selecting input directory and output format.
+-   **User-friendly GUI:** Simple and intuitive interface for selecting input files or directory and output format.
 -   **Batch Conversion:** Processes all XRM files within a directory and its subdirectories.
--   **Output Format Selection:** Allows users to choose between TIFF and BMP output formats.
+-   **Output Format Selection:** Allows users to choose between TIFF and PNG output formats.
 -   **Progress Tracking:** Displays a progress bar to monitor the conversion process.
 -   **Error Handling:** Robust error handling for missing or invalid XRM data.
 -   **Image Rescaling:** Rescales image intensity using percentile-based clipping for improved visualization.
+-   **Input Selection Prompt:** Prompts the user to choose between selecting files or a directory.
+-   **Logging:** Logs processing information and errors to `xrm_converter.log`.
 
 ## Dependencies
 
 -   Python 3.x
--   `tkinter`: For GUI creation (standard library).
+-   `PyQt5`: For GUI creation. Install using `pip install PyQt5`.
 -   `pathlib`: For file path manipulation (standard library).
 -   `numpy`: For numerical operations and array manipulation. Install using `pip install numpy`.
 -   `olefile`: For reading XRM file structure. Install using `pip install olefile`.
 -   `scikit-image (skimage)`: For image processing (rescaling, saving). Install using `pip install scikit-image`.
+-   `logging`: For logging processing information and errors (standard library).
+
 
 ## Installation
 
@@ -44,25 +48,31 @@ This Python script provides a graphical user interface (GUI) for batch convertin
     python xrm_converter.py
     ```
 
-2.  **Use the GUI:**
+.  **Use the GUI:**
 
-    -   Click the "Browse" button to select the directory containing your XRM files.
-    -   Choose the desired output format (TIFF or BMP) from the dropdown menu.
-    -   Click the "Convert XRM Files" button to start the conversion process.
+    -   Click the "Select Files or Directory" button.
+    -   A dialog will prompt you to choose between selecting files or a directory.
+    -   Select the desired files or directory.
+    -   Choose the desired output format (TIFF or PNG) from the dropdown menu.
+    -   Click the "Convert" button to start the conversion process.
     -   A progress bar will display the conversion progress.
     -   Upon completion, a message box will confirm the conversion, and the GUI will close.
     -   The converted images will be saved in the same directories as the original XRM files.
+    -   Check the `xrm_converter.log` file for any processing information or errors.
 
 ## Example
 
 Suppose you have a directory `C:/XRM_Data` containing several XRM files. You would:
 
 1.  Run the script.
-2.  Browse to and select `C:/XRM_Data`.
-3.  Choose either TIFF or BMP as the output format.
-4.  Click "Convert XRM Files".
+2.  Click "Select Files or Directory".
+3.  Choose either "Select Files" or "Select Directory".
+4.  Browse to and select `C:/XRM_Data` or the specific files.
+5.  Choose either TIFF or PNG as the output format.
+6.  Click "Convert".
 
-The resulting TIFF or BMP images will be saved alongside the original XRM files within the `C:/XRM_Data` directory and any of its subdirectories.
+The resulting TIFF or PNG images will be saved alongside the original XRM files within the `C:/XRM_Data` directory or in the same directory as the selected files.
+
 
 ## Author
 
@@ -70,7 +80,7 @@ The resulting TIFF or BMP images will be saved alongside the original XRM files 
 
 ## Version
 
--   3.0.0
+-   3.2.0
 
 ## License
 
