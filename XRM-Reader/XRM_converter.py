@@ -1,52 +1,57 @@
 """
-Batch XRM to TIFF/BMP Converter.
+Batch XRM to TIFF/PNG Converter.
 
 This script provides a graphical user interface (GUI) for batch converting
-XRM (ZEISS proprietary microscopy data format) files to TIFF or BMP image formats.
+XRM (ZEISS proprietary microscopy data format) files to TIFF or PNG image formats.
 It recursively searches a user-specified directory for XRM files, extracts
 image data, and saves the converted images in the same directory as the
 source XRM files.
 
 Features:
-    - User-friendly GUI for input directory selection.
-    - Option to choose between TIFF and BMP output formats.
+    - User-friendly GUI for selecting input files or directory.
+    - Option to choose between TIFF and PNG output formats.
     - Progress bar to track conversion progress.
     - Error handling for missing or invalid XRM data.
     - Rescaling of image intensity using percentile-based clipping.
+    - Logging of processing information and errors to 'xrm_converter.log'.
 
 Dependencies:
-    - tkinter: For GUI creation.
+    - PyQt5: For GUI creation.
     - pathlib: For file path manipulation.
     - numpy: For numerical operations and array manipulation.
     - olefile: For reading XRM file structure.
     - struct: For unpacking binary data.
     - skimage: For image rescaling and saving.
+    - logging: For logging processing information and errors.
 """
 
 # Author: Daniel Bribiesca Sykes <daniel.bribiescasykes@glasgow.ac.uk>
-# Version: 3.0.0
+# Version: 3.2.0
 
-import tkinter as tk
-from tkinter import filedialog, ttk, messagebox
+import sys
+from PyQt5.QtWidgets import (
+    QApplication,
+    QWidget,
+    QPushButton,
+    QVBoxLayout,
+    QFileDialog,
+    QLabel,
+    QProgressBar,
+    QComboBox,
+    QMessageBox,
+    QDialog,
+    QRadioButton,
+    QDialogButtonBox,
+)
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from pathlib import Path
 import numpy as np
 import olefile as olef
 import struct
 from skimage import io, exposure
+import logging
 
-
-def choose_directory(entry):
-    """
-    Open a directory selection dialog and update the input entry with the selected directory.
-
-    Parameters
-    ----------
-        entry (tk.Entry): The tkinter Entry widget to update with the selected directory path.
-    """
-    directory = filedialog.askdirectory(title="Select XRM Directory")
-    if directory:
-        entry.delete(0, tk.END)
-        entry.insert(0, directory)
+logging.basicConfig(filename='xrm_converter.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 def ole_extract(ole, stream, datatype):
@@ -69,17 +74,14 @@ def ole_extract(ole, stream, datatype):
     return None
 
 
-def process_xrm(file_path, output_format, progress_var, progress_bar, total_files):
+def process_xrm(file_path, output_format):
     """
-    Process a single XRM file, extract image data, and save it as a TIFF or BMP file.
+    Process a single XRM file, extract image data, and save it as a TIFF or PNG file.
 
     Parameters
     ----------
         file_path (Path): The path to the XRM file.
-        output_format (str): The desired output format ('tiff' or 'bmp').
-        progress_var (tk.IntVar): The tkinter IntVar for tracking progress.
-        progress_bar (ttk.Progressbar): The tkinter Progressbar widget for displaying progress.
-        total_files (int): The total number of XRM files to process.
+        output_format (str): The desired output format ('tiff' or 'png').
 
     Returns
     -------
@@ -107,93 +109,132 @@ def process_xrm(file_path, output_format, progress_var, progress_bar, total_file
             output_file = file_path.parent / f"{file_path.stem}.{output_format}"
             io.imsave(str(output_file), rescale_img)
 
+            logging.info(f"Successfully processed {file_path.name}")
             return True
 
     except Exception as e:
-        messagebox.showerror("Error", f"Error processing {file_path.name}: {e}")
-        print(f"Error processing {file_path.name}: {e}")
+        logging.error(f"Error processing {file_path.name}: {e}")
         return False
 
-    finally:
-        progress_var.set(progress_var.get() + 1)
-        progress_bar["value"] = progress_var.get() / total_files * 100
+
+class XRMConverterThread(QThread):
+    """Thread for batch converting XRM files."""
+
+    progress = pyqtSignal(int)
+    finished = pyqtSignal()
+
+    def __init__(self, file_paths, output_format):
+        super().__init__()
+        self.file_paths = file_paths
+        self.output_format = output_format
+
+    def run(self):
+        total_files = len(self.file_paths)
+        for i, file_path in enumerate(self.file_paths):
+            process_xrm(Path(file_path), self.output_format)
+            self.progress.emit(int((i + 1) / total_files * 100))
+        self.finished.emit()
 
 
-def batch_xrm_convert(root, input_dir, output_format, progress_var, progress_bar):
-    """
-    Convert all XRM files in the specified directory to the chosen output format.
+class SelectionDialog(QDialog):
+    """Dialog for selecting input type (files or directory)."""
 
-    Parameters
-    ----------
-        root (tk.Tk): The main tkinter window.
-        input_dir (Path): The directory containing the XRM files.
-        output_format (str): The desired output format ('tiff' or 'bmp').
-        progress_var (tk.IntVar): The tkinter IntVar for tracking progress.
-        progress_bar (ttk.Progressbar): The tkinter Progressbar widget for displaying progress.
-    """
-    files = list(input_dir.rglob("*.xrm"))
-    total_files = len(files)
-    progress_bar["maximum"] = total_files
-    progress_var.set(0)
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.initUI()
 
-    for file_path in files:
-        process_xrm(
-            file_path, output_format, progress_var, progress_bar, total_files
-        )
+    def initUI(self):
+        self.radio_files = QRadioButton("Select Files", self)
+        self.radio_directory = QRadioButton("Select Directory", self)
+        self.radio_files.setChecked(True)
 
-    root.after(10, lambda: [messagebox.showinfo("Conversion Complete", "XRM conversion finished."), root.destroy()])
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
 
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.radio_files)
+        layout.addWidget(self.radio_directory)
+        layout.addWidget(button_box)
 
-def main():
-    """Set up and run the main GUI for the XRM to TIFF/BMP converter."""
-    root = tk.Tk()
-    root.title("XRM to TIFF/BMP Converter")
+        self.setWindowTitle("Select Input Type")
 
-    input_dir_label = tk.Label(root, text="Input Directory:")
-    input_dir_label.grid(row=0, column=0, sticky="w", padx=5, pady=5)
-
-    input_dir_entry = tk.Entry(root, width=50)
-    input_dir_entry.grid(row=0, column=1, padx=5, pady=5)
-
-    input_dir_button = tk.Button(
-        root, text="Browse", command=lambda: choose_directory(input_dir_entry)
-    )
-    input_dir_button.grid(row=0, column=2, padx=5, pady=5)
-
-    output_format_label = tk.Label(root, text="Output Format:")
-    output_format_label.grid(row=1, column=0, sticky="w", padx=5, pady=5)
-
-    output_format_var = tk.StringVar(root)
-    output_format_var.set("tiff")
-    output_format_dropdown = tk.OptionMenu(root, output_format_var, "tiff", "bmp")
-    output_format_dropdown.grid(row=1, column=1, padx=5, pady=5)
-
-    progress_var = tk.IntVar()
-    progress_bar = ttk.Progressbar(
-        root,
-        variable=progress_var,
-        maximum=100,
-        orient="horizontal",
-        length=300,
-        mode="determinate",
-    )
-    progress_bar.grid(row=2, column=0, columnspan=3, padx=5, pady=5)
-
-    convert_button = tk.Button(
-        root,
-        text="Convert XRM Files",
-        command=lambda: batch_xrm_convert(
-            root,
-            Path(input_dir_entry.get()),
-            output_format_var.get(),
-            progress_var,
-            progress_bar,
-        ),
-    )
-    convert_button.grid(row=3, column=1, pady=10)
-
-    root.mainloop()
+    def getSelection(self):
+        """Get the user's selection (files or directory)."""
+        if self.exec_() == QDialog.Accepted:
+            if self.radio_files.isChecked():
+                return "files"
+            else:
+                return "directory"
+        return None
 
 
-if __name__ == "__main__":
-    main()
+class XRMConverter(QWidget):
+    """Main GUI for the XRM to TIFF/PNG converter."""
+
+    def __init__(self):
+        super().__init__()
+        self.initUI()
+
+    def initUI(self):
+        self.select_button = QPushButton('Select Files or Directory', self)
+        self.select_button.clicked.connect(self.selectFilesOrDirectory)
+
+        self.output_format_label = QLabel('Output Format:', self)
+        self.output_format_combo = QComboBox(self)
+        self.output_format_combo.addItems(['tiff', 'png'])
+
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setAlignment(Qt.AlignCenter)
+
+        self.convert_button = QPushButton('Convert', self)
+        self.convert_button.clicked.connect(self.convert)
+        self.convert_button.setEnabled(False)
+
+        self.layout = QVBoxLayout(self)
+        self.layout.addWidget(self.select_button)
+        self.layout.addWidget(self.output_format_label)
+        self.layout.addWidget(self.output_format_combo)
+        self.layout.addWidget(self.progress_bar)
+        self.layout.addWidget(self.convert_button)
+
+        self.setWindowTitle('XRM to TIFF/PNG Converter')
+        self.show()
+
+    def selectFilesOrDirectory(self):
+        """Open a dialog to select files or a directory."""
+        dialog = SelectionDialog(self)
+        selection = dialog.getSelection()
+
+        if selection == "files":
+            file_paths, _ = QFileDialog.getOpenFileNames(self, "Select XRM Files", "", "XRM Files (*.xrm);;All Files (*)")
+            if file_paths:
+                self.file_paths = file_paths
+                self.convert_button.setEnabled(True)
+        elif selection == "directory":
+            directory = QFileDialog.getExistingDirectory(self, "Select XRM Directory")
+            if directory:
+                self.file_paths = list(Path(directory).rglob("*.xrm"))
+                self.convert_button.setEnabled(True)
+
+    def convert(self):
+        """Start the XRM to TIFF/PNG conversion process."""
+        self.progress_bar.setValue(0)
+        self.convert_button.setEnabled(False)
+        self.select_button.setEnabled(False)
+
+        self.thread = XRMConverterThread(self.file_paths, self.output_format_combo.currentText())
+        self.thread.progress.connect(self.progress_bar.setValue)
+        self.thread.finished.connect(self.conversionFinished)
+        self.thread.start()
+
+    def conversionFinished(self):
+        """Handle the completion of the conversion process."""
+        QMessageBox.information(self, "Conversion Complete", "XRM conversion finished.")
+        self.close()
+
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    ex = XRMConverter()
+    sys.exit(app.exec_())
