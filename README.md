@@ -75,7 +75,7 @@ If you encounter any issues or have suggestions for improvements, please open an
 
 ## License
 
-This repository is licensed under the GNU GPL-3.0 license.
+This repository is licensed under the CC BY-NC 4.0 license.
 
 ## Contact
 
