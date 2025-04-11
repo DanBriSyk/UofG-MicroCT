@@ -1,12 +1,12 @@
 """
-Batch TXM to TIFF/BMP converter.
+Batch TXM to TIFF converter.
 
-Generates a GUI for users to select a folder to locate and convert .txm files into TIFF/BMP stacks,
+Generates a GUI for users to select a folder to locate and convert .txm files into TIFF stacks,
 in a recursive and automated manner.
 """
 
 # Author: Daniel Bribiesca Sykes <daniel.bribiescasykes@glasgow.ac.uk>
-# Version: 1.3.3
+# Version: 1.3.4
 
 from pathlib import Path
 import numpy as np
@@ -72,8 +72,8 @@ LOG_FORMAT = '%(asctime)s - %(levelname)s - %(message)s'
 logging.basicConfig(filename=LOG_FILE_NAME, level=logging.INFO, format=LOG_FORMAT)
 
 
-class WorkerThread(QThread):
-    """A separate thread for running the conversion process.  This prevents the GUI from freezing."""
+class ParallelWorkerThread(QThread):
+    """A separate thread for running the parallel conversion process.  This prevents the GUI from freezing."""
 
     progress_update = pyqtSignal(int, str)
     finished = pyqtSignal()
@@ -101,7 +101,7 @@ class WorkerThread(QThread):
         self.is_stopped = False
 
     def run(self):
-        """Create main method for the thread.  Calls the conversion process."""
+        """Create main method for the thread. Calls the conversion process."""
         try:
             if not self.txm_files:
                 raise FileNotFoundError("No .txm files found in the selected folder.")
@@ -138,6 +138,68 @@ class WorkerThread(QThread):
         if self.client:
             self.client.cancel(futures=None)
             self.client.close()
+
+
+class SerialWorkerThread(QThread):
+    """A separate thread for running the serial conversion process.  This prevents the GUI from freezing."""
+
+    progress_update = pyqtSignal(int, str)
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+    log_message = pyqtSignal(str)
+    stopped = pyqtSignal()
+
+    def __init__(
+            self,
+            import_folder,
+            output_format_index,
+            zip_output,
+            should_display_slice,
+            convert_to_8bit
+            ):
+        super().__init__()
+        self.import_folder = import_folder
+        self.output_format_index = output_format_index
+        self.zip_output = zip_output
+        self.should_display_slice = should_display_slice
+        self.convert_to_8bit = convert_to_8bit
+        self.is_stopped = False
+
+    def run(self):
+        """Create main method for the thread. Calls the conversion process."""
+        txm_files = list(self.import_folder.rglob('*.txm'))
+        startTime = datetime.now()
+
+        for i, txm_file in enumerate(txm_files):
+            if self.is_stopped:
+                break
+            try:
+                process_txm(
+                    txm_file,
+                    self.output_format_index,
+                    self.zip_output,
+                    self.should_display_slice,
+                    self.convert_to_8bit,
+                )
+                self.progress_update.emit(i + 1, txm_file.name)
+                self.log_message.emit(f"Processed: {txm_file.name}")
+            except Exception as e:
+                self.log_message.emit(f"Error processing {txm_file.name}: {e}")
+                logging.error(f"Error processing {txm_file.name}: {e}")
+
+        compTime = str((datetime.now() - startTime))[:-4]
+        print(f'\nBatch conversion completed in {compTime}')
+        self.log_message.emit(f'\nBatch conversion completed in {compTime}')
+        logging.info(f'Batch conversion completed in {compTime}')
+
+        if self.is_stopped:
+            self.stopped.emit()
+        else:
+            self.finished.emit()
+
+    def stop(self):
+        """Stop the conversion process."""
+        self.is_stopped = True
 
 
 def convert_scans(
@@ -528,6 +590,13 @@ class Window(QDialog):
         self.dialog_buttons.accepted.connect(self.start_conversion)
         self.dialog_buttons.rejected.connect(self.reject)
 
+        # Processing mode (parallel or serial)
+        self.processing_mode_label = QLabel("Processing Mode:")
+        self.processing_mode_combo = QComboBox()
+        self.processing_mode_combo.addItems(["Parallel", "Serial"])
+        self.processing_mode_combo.activated.connect(self.set_processing_mode)
+        self.processing_mode = "Parallel"  # Default processing mode.
+
         # Layout Setup
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -546,6 +615,8 @@ class Window(QDialog):
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.text_output)
         layout.addWidget(self.dialog_buttons)
+        layout.addWidget(self.processing_mode_label)
+        layout.addWidget(self.processing_mode_combo)
 
         self.setLayout(layout)
         self.thread = None
@@ -590,6 +661,10 @@ class Window(QDialog):
         """Set the 'convert_to_8bit' flag."""
         self.convert_to_8bit = self.convert_to_8bit_option.isChecked()
 
+    def set_processing_mode(self, index):
+        """Set the processing mode based on the combo box selection."""
+        self.processing_mode = self.processing_mode_combo.itemText(index)
+
     def activated(self, index):
         """Set the 'out_put' instance variable to the index of the selected output format."""
         self.selected_output_index = index
@@ -608,13 +683,22 @@ class Window(QDialog):
         self.progress_bar.setVisible(True)
         self.dialog_buttons.button(QDialogButtonBox.Ok).setEnabled(False)
 
-        self.worker_thread = WorkerThread(
-            Path(self.selected_directory),
-            self.selected_output_index,
-            self.should_zip_output,
-            self.should_display_slice,
-            self.convert_to_8bit
-        )
+        if self.processing_mode == "Parallel":
+            self.worker_thread = ParallelWorkerThread(
+                Path(self.selected_directory),
+                self.selected_output_index,
+                self.should_zip_output,
+                self.should_display_slice,
+                self.convert_to_8bit
+            )
+        else:
+            self.worker_thread = SerialWorkerThread(
+                Path(self.selected_directory),
+                self.selected_output_index,
+                self.should_zip_output,
+                self.should_display_slice,
+                self.convert_to_8bit,
+            )
         self.worker_thread.progress_update.connect(self.update_progress)
         self.worker_thread.finished.connect(self.conversion_finished)
         self.worker_thread.error.connect(self.conversion_error)
@@ -642,14 +726,18 @@ class Window(QDialog):
 
     def reject(self):
         """Close the dialog and print a cancellation message."""
-        if self.worker_thread and self.worker_thread.isRunning():
+        if self.worker_thread:
             self.worker_thread.stop()
+            self.worker_thread.wait()
         print("Dialog Cancelled")
         close_dask_client(self.dask_client)
         super().reject()
 
     def conversion_stopped(self):
         """Call when the conversion is stopped."""
+        if self.worker_thread:
+            self.worker_thread.stop()
+            self.worker_thread.wait()
         print("Conversion Stopped.")
         self.update_text_output("Conversion Stopped.")
         self.progress_bar.setVisible(False)
@@ -663,8 +751,9 @@ class Window(QDialog):
         self.dialog_buttons.setEnabled(True)
         QMessageBox.information(self, "Success", "Conversion complete.")
         close_dask_client(self.dask_client)
-        self.worker_thread.quit()
-        self.worker_thread.wait()
+        if self.worker_thread:
+            self.worker_thread.quit()
+            self.worker_thread.wait()
         self.accept()
 
     def conversion_error(self, message):
