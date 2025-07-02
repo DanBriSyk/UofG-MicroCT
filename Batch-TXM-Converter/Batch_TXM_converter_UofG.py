@@ -6,7 +6,7 @@ in a recursive and automated manner.
 """
 
 # Author: Daniel Bribiesca Sykes <daniel.bribiescasykes@glasgow.ac.uk>
-# Version: 1.3.4
+# Version: 1.3.5
 
 from pathlib import Path
 import numpy as np
@@ -84,6 +84,7 @@ class ParallelWorkerThread(QThread):
     def __init__(
             self,
             import_folder,
+            output_base_dir,
             output_format_index,
             zip_output,
             should_display_slice,
@@ -91,6 +92,7 @@ class ParallelWorkerThread(QThread):
             ):
         super().__init__()
         self.import_folder = import_folder
+        self.output_base_dir = output_base_dir
         self.output_format_index = output_format_index
         self.zip_output = zip_output
         self.should_display_slice = should_display_slice
@@ -113,6 +115,7 @@ class ParallelWorkerThread(QThread):
 
             convert_scans(
                 self.txm_files,
+                self.output_base_dir,
                 self.output_format_index,
                 self.zip_output,
                 self.should_display_slice,
@@ -152,6 +155,7 @@ class SerialWorkerThread(QThread):
     def __init__(
             self,
             import_folder,
+            output_base_dir,
             output_format_index,
             zip_output,
             should_display_slice,
@@ -159,6 +163,7 @@ class SerialWorkerThread(QThread):
             ):
         super().__init__()
         self.import_folder = import_folder
+        self.output_base_dir = output_base_dir
         self.output_format_index = output_format_index
         self.zip_output = zip_output
         self.should_display_slice = should_display_slice
@@ -173,9 +178,12 @@ class SerialWorkerThread(QThread):
         for i, txm_file in enumerate(txm_files):
             if self.is_stopped:
                 break
+            short_output_name = f"scan_{str(i+1).zfill(2)}"
             try:
                 process_txm(
                     txm_file,
+                    self.output_base_dir,
+                    short_output_name,
                     self.output_format_index,
                     self.zip_output,
                     self.should_display_slice,
@@ -204,6 +212,7 @@ class SerialWorkerThread(QThread):
 
 def convert_scans(
         txm_files,
+        output_base_dir,
         output_format_index,
         zip_output,
         should_display_slice,
@@ -228,6 +237,8 @@ def convert_scans(
     """
     startTime = datetime.now()
 
+    output_map = {txm_file: f"scan_{str(i+1).zfill(2)}" for i, txm_file in enumerate(txm_files)}
+
     futures = {}
     for txm_file in txm_files:
         if worker_thread.is_stopped:
@@ -236,6 +247,8 @@ def convert_scans(
         future = client.submit(
             process_txm,
             txm_file,
+            output_base_dir,
+            output_map[txm_file],
             output_format_index,
             zip_output,
             should_display_slice,
@@ -266,7 +279,7 @@ def convert_scans(
     logging.info(f'Batch conversion completed in {compTime}')
 
 
-def process_txm(txm_file, output_format_index, zip_output, should_display_slice, convert_to_8bit):
+def process_txm(txm_file, output_base_dir, short_output_name, output_format_index, zip_output, should_display_slice, convert_to_8bit):
     """
     Process a single TXM file.
 
@@ -287,7 +300,7 @@ def process_txm(txm_file, output_format_index, zip_output, should_display_slice,
         with olef.OleFileIO(txm_file) as ole:
             n_cols, n_rows, n_images, pixel_size, f_type = _extract_metadata(ole)
             image_streams = _get_sorted_image_streams(ole)
-            out_folder = _create_output_folder(txm_file, output_format_index)
+            out_folder = _create_output_folder(txm_file, output_base_dir, short_output_name, output_format_index)
 
             slices = _load_slices(ole, image_streams, f_type, n_cols, n_rows)
 
@@ -311,7 +324,7 @@ def process_txm(txm_file, output_format_index, zip_output, should_display_slice,
         logging.info(f'{txm_file.stem} converted')
 
         if zip_output:
-            _zip_output(txm_file, out_folder, output_format_index)
+            _zip_output(txm_file, out_folder, short_output_name, output_format_index)
 
     except Exception as e:
         logging.error(f"Error processing {txm_file.name}: {e}")
@@ -341,14 +354,14 @@ def _get_sorted_image_streams(ole):
         raise Exception(f"Error getting image streams: {e}")
 
 
-def _create_output_folder(txm_file, output_format_index):
+def _create_output_folder(txm_file, output_base_dir, short_output_name, output_format_index):
     """Create the output folder."""
     try:
-        out_folder = txm_file.parent / txm_file.stem / OUTPUT_FORMAT_EXTS[OutputFormat(output_format_index)]
+        out_folder = output_base_dir / short_output_name / OUTPUT_FORMAT_EXTS[OutputFormat(output_format_index)]
         out_folder.mkdir(parents=True, exist_ok=True)
         return out_folder
     except Exception as e:
-        raise Exception(f"Error creating output folder: {e}")
+        raise Exception(f"Error creating output folder for {txm_file.name}: {e}")
 
 
 def _load_slices(ole, image_streams, f_type, n_cols, n_rows):
@@ -561,6 +574,13 @@ class Window(QDialog):
         self.output_combo.addItems(["Tiff stack", "3D Tif"])
         self.output_combo.activated.connect(self.activated)
 
+        # Output Folder Selection
+        self.output_base_dir_label = QLabel("Output Directory:")
+        self.output_base_dir_path_label = QLabel("No output directory selected")
+        self.output_base_dir_path_label.setStyleSheet("font-size: 10pt; font-weight: 500; color: #555;")
+        self.output_base_dir_button = QDialogButtonBox(QDialogButtonBox.Open)
+        self.output_base_dir_button.clicked.connect(self.select_output_base_dir)
+
         # Zip Option
         self.zip_option = QCheckBox("Zip each image stack")
         self.zip_option.clicked.connect(self.check_zip)
@@ -600,12 +620,18 @@ class Window(QDialog):
         # Layout Setup
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
-        layout.addWidget(self.folder_label)
 
+        layout.addWidget(self.folder_label)
         folder_layout = QHBoxLayout()
         folder_layout.addWidget(self.folder_button)
         folder_layout.addWidget(self.folder_path_label)
         layout.addLayout(folder_layout)
+
+        layout.addWidget(self.output_base_dir_label)
+        output_dir_layout = QHBoxLayout()
+        output_dir_layout.addWidget(self.output_base_dir_button)
+        output_dir_layout.addWidget(self.output_base_dir_path_label)
+        layout.addLayout(output_dir_layout)
 
         layout.addWidget(self.output_label)
         layout.addWidget(self.output_combo)
@@ -649,6 +675,15 @@ class Window(QDialog):
         self.dask_client = Client(cluster)
         QCoreApplication.instance().dask_client = self.dask_client
 
+    def select_output_base_dir(self):
+        """Set the output directory for tiff export."""
+        folder = QFileDialog.getExistingDirectory(self, "Select Output Directory")
+        if folder:
+            self.output_base_dir_path_label.setText(folder)
+            self.selected_output_base_directory = Path(folder)
+        else:
+            self.selected_output_base_directory = None
+
     def check_zip(self):
         """Set the 'zip' instance variable based on the state of the zip option radio button."""
         self.should_zip_output = self.zip_option.isChecked()
@@ -675,6 +710,10 @@ class Window(QDialog):
             QMessageBox.warning(self, "Warning", "Please select a folder.")
             return
 
+        if not self.selected_output_base_directory:
+            QMessageBox.warning(self, "Warning", "Please select an output directory.")
+            return
+
         if self.dask_client is None:
             QMessageBox.critical(self, "Error", "Dask client is not initialized. Please select a folder.")
             return
@@ -686,6 +725,7 @@ class Window(QDialog):
         if self.processing_mode == "Parallel":
             self.worker_thread = ParallelWorkerThread(
                 Path(self.selected_directory),
+                self.selected_output_base_directory,
                 self.selected_output_index,
                 self.should_zip_output,
                 self.should_display_slice,
@@ -694,6 +734,7 @@ class Window(QDialog):
         else:
             self.worker_thread = SerialWorkerThread(
                 Path(self.selected_directory),
+                self.selected_output_base_directory,
                 self.selected_output_index,
                 self.should_zip_output,
                 self.should_display_slice,
