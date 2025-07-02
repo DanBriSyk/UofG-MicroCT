@@ -5,7 +5,7 @@ Generates a GUI for users to extract metadata from a RCP/TXM/TXRM file and expor
 """
 
 # Author: Daniel Bribiesca Sykes <daniel.bribiescasykes@glasgow.ac.uk>
-# Version: 3.2.0
+# Version: 3.2.1
 
 import olefile as olef
 from pathlib import Path
@@ -21,6 +21,7 @@ from PyQt5.QtWidgets import (
     QGridLayout,
     QFileDialog,
     QVBoxLayout,
+    QPushButton,
 )
 import math
 from datetime import datetime
@@ -35,6 +36,7 @@ class MetadataExtractorGUI(QDialog):
         super().__init__()
         self.out_file = 3
         self.file_path = ""
+        self.output_dir = None
         self.init_ui()
 
     def init_ui(self):
@@ -72,6 +74,18 @@ class MetadataExtractorGUI(QDialog):
         output_layout.addWidget(self.console_radio, 3, 0)
         layout.addLayout(output_layout)
 
+        # Output directory selection
+        output_dir_layout = QGridLayout()
+        self.output_dir_label_text = QLabel("Output directory:")
+        self.output_dir_label = QLabel("Default (same as input file)")
+        self.output_dir_button = QPushButton("Browse Output Directory")
+        self.output_dir_button.clicked.connect(self.select_output_directory)
+
+        output_dir_layout.addWidget(self.output_dir_label_text, 0, 0)
+        output_dir_layout.addWidget(self.output_dir_label, 0, 1)
+        output_dir_layout.addWidget(self.output_dir_button, 1, 0, 1, 2)
+        layout.addLayout(output_dir_layout)
+
         # Action buttons
         self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self.button_box.accepted.connect(self.accept)
@@ -88,6 +102,8 @@ class MetadataExtractorGUI(QDialog):
         if file_path:
             self.file_path = file_path
             self.file_path_label.setText(os.path.basename(file_path))
+            self.output_dir = None
+            self.output_dir_label.setText("Default (same as input file)")
 
     def set_output_format(self):
         """Set the output format based on radio button selection."""
@@ -97,6 +113,16 @@ class MetadataExtractorGUI(QDialog):
             self.out_file = 2
         else:
             self.out_file = 3
+
+    def select_output_directory(self):
+        """Open a file dialog to select an output directory."""
+        output_dir = QFileDialog.getExistingDirectory(self, "Select Output Directory")
+        if output_dir:
+            self.output_dir = Path(output_dir)
+            self.output_dir_label.setText(str(self.output_dir))
+        else:
+            self.output_dir = None
+            self.output_dir_label.setText("Default (same as input file)")
 
 
 def stream_unpacker(ole, stream, datatype):
@@ -227,7 +253,7 @@ def _get_acq_mode(stitch_enabled, acq_mode_str, acq_mode_val):
     return acq_mode
 
 
-def extract_metadata(file_path, out_file):
+def extract_metadata(file_path, out_file, output_dir):
     """Extract metadata from RCP/TXM/TXRM files."""
     try:
         file_path = Path(file_path)
@@ -243,10 +269,10 @@ def extract_metadata(file_path, out_file):
                     recipe_name = stream_unpacker(ole, f"RecipePoint{x}/PointName", 0).decode("ascii")[:-1]
                     metadata["Recipe"] = f"Recipe:\t{recipe_name}\n"
                     extract_recipe_data(ole, metadata, x)
-                    print_or_write_metadata(metadata.copy(), out_file, file_path, recipe_name)
+                    print_or_write_metadata(metadata.copy(), out_file, file_path, output_dir, recipe_name)
             else:
                 extract_common_data(ole, metadata, file_suffix)
-                print_or_write_metadata(metadata, out_file, file_path)
+                print_or_write_metadata(metadata, out_file, file_path, output_dir)
     except Exception as e:
         print(f"Error reading file {file_path}: {e}")
 
@@ -389,18 +415,28 @@ def extract_recipe_data(ole, metadata, x):
     metadata["V_exp"] = f"Variable exposure:\t{'Enabled' if VE_mode == 1 else 'Disabled'}\n"
 
 
-def print_or_write_metadata(metadata, out_file, file_path, recipe_name=None):
+def print_or_write_metadata(metadata, out_file, file_path, output_dir, recipe_name=None):
     """Print or write metadata to a file or console."""
+    # Determine the output directory
+    if output_dir is None:
+        output_directory = file_path.parent
+    else:
+        output_directory = output_dir
+
     if out_file == 1:  # TXT
         filename = f"{file_path.stem}_{recipe_name}_{file_path.suffix[1:]}.txt" if recipe_name else f"{file_path.stem}_{file_path.suffix[1:]}.txt"
-        with open(filename, "w") as f:
+        full_output_path = output_directory / filename
+        with open(full_output_path, "w") as f:
             for value in metadata.values():
                 f.write(value)
+        print(f"Metadata saved to: {full_output_path}")
     elif out_file == 2:  # CSV
         filename = f"{file_path.stem}_{recipe_name}_{file_path.suffix[1:]}.csv" if recipe_name else f"{file_path.stem}_{file_path.suffix[1:]}.csv"
-        with open(filename, "w") as f:
+        full_output_path = output_directory / filename
+        with open(full_output_path, "w") as f:
             for value in metadata.values():
                 f.write(value.replace("\t", ","))
+        print(f"Metadata saved to: {full_output_path}")
     elif out_file == 3:  # Console
         for value in metadata.values():
             print(value.strip())
@@ -413,7 +449,7 @@ def main():
     gui = MetadataExtractorGUI()
     if gui.exec_() == QDialog.Accepted:
         if gui.file_path:
-            extract_metadata(gui.file_path, gui.out_file)
+            extract_metadata(gui.file_path, gui.out_file, gui.output_dir)
         else:
             print("No file selected.")
     sys.exit()
