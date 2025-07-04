@@ -6,7 +6,7 @@ in a recursive and automated manner.
 """
 
 # Author: Daniel Bribiesca Sykes <daniel.bribiescasykes@glasgow.ac.uk>
-# Version: 1.3.5
+# Version: 1.3.6
 
 from pathlib import Path
 import numpy as np
@@ -48,7 +48,6 @@ GUI_Y_POS = 200
 # Processing Constants
 DISPLAY_SLICE_WAIT_TIME = 10000
 AVAILABLE_MEMORY = psutil.virtual_memory().available
-MEMORY_PER_SCAN_FACTOR = 1.5
 
 
 # Output Format Constants
@@ -532,6 +531,7 @@ class Window(QDialog):
         self.should_display_slice = False
         self.convert_to_8bit = False
         self.selected_directory = ""
+        self.selected_output_base_directory = None
         self.dask_client = None
         self.number_of_files = 0
         self.initUI()
@@ -562,8 +562,8 @@ class Window(QDialog):
         """)
 
         # Directory Selection
-        self.folder_label = QLabel("Selected Folder:")
-        self.folder_path_label = QLabel("No folder selected")
+        self.folder_label = QLabel("Selected Input Directory:")
+        self.folder_path_label = QLabel("No input directory selected")
         self.folder_path_label.setStyleSheet("font-size: 10pt; font-weight: 500; color: #555;")
         self.folder_button = QDialogButtonBox(QDialogButtonBox.Open)
         self.folder_button.clicked.connect(self.file_dialog)
@@ -660,7 +660,7 @@ class Window(QDialog):
             self.selected_directory = folder
             self.number_of_files = len(list(Path(self.selected_directory).rglob('*.txm')))
             # Calculate memory per worker and initialize Dask here
-            memory_per_worker = (AVAILABLE_MEMORY / self.number_of_files) * MEMORY_PER_SCAN_FACTOR
+            memory_per_worker = AVAILABLE_MEMORY / self.number_of_files
             print(f"Number of files to process: {self.number_of_files}")
             print(f'Memory per worker: {round(memory_per_worker / 1e6, 0)} MB')
             logging.info(f"Number of files to process: {self.number_of_files}")
