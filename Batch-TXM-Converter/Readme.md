@@ -85,4 +85,4 @@ Daniel Bribiesca Sykes (<daniel.bribiescasykes@glasgow.ac.uk>)
 
 ## Version
 
-1.3.4
+1.3.6
