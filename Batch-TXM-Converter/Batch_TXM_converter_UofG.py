@@ -6,7 +6,7 @@ in a recursive and automated manner.
 """
 
 # Author: Daniel Bribiesca Sykes <daniel.bribiescasykes@glasgow.ac.uk>
-# Version: 1.3.6
+# Version: 1.3.7
 
 from pathlib import Path
 import numpy as np
@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
     QProgressBar,
     QApplication,
     QTextEdit,
+    QLineEdit,
     )
 from zipfile import ZipFile
 import olefile as olef
@@ -172,6 +173,10 @@ class SerialWorkerThread(QThread):
     def run(self):
         """Create main method for the thread. Calls the conversion process."""
         txm_files = list(self.import_folder.rglob('*.txm'))
+        if not txm_files:
+            self.error.emit("No .txm files found in the selected folder.")
+            return
+
         startTime = datetime.now()
 
         for i, txm_file in enumerate(txm_files):
@@ -534,6 +539,7 @@ class Window(QDialog):
         self.selected_output_base_directory = None
         self.dask_client = None
         self.number_of_files = 0
+        self.memory_percentage = 90
         self.initUI()
 
     def initUI(self):
@@ -593,6 +599,12 @@ class Window(QDialog):
         self.convert_to_8bit_option = QCheckBox("Convert to 8-bit")
         self.convert_to_8bit_option.clicked.connect(self.check_8bit_conversion)
 
+        # Memory Percentage Input
+        self.memory_label = QLabel("Memory Usage (%):")
+        self.memory_input = QLineEdit(str(self.memory_percentage))
+        self.memory_input.setPlaceholderText("5-95")
+        self.memory_input.editingFinished.connect(self.validate_memory_percentage)
+
         # Progress Bar
         self.progress_bar = QProgressBar(self)
         self.progress_bar.setGeometry(30, 80, 440, 25)
@@ -638,6 +650,12 @@ class Window(QDialog):
         layout.addWidget(self.zip_option)
         layout.addWidget(self.check_option)
         layout.addWidget(self.convert_to_8bit_option)
+
+        memory_layout = QHBoxLayout()
+        memory_layout.addWidget(self.memory_label)
+        memory_layout.addWidget(self.memory_input)
+        layout.addLayout(memory_layout)
+
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.text_output)
         layout.addWidget(self.dialog_buttons)
@@ -658,22 +676,23 @@ class Window(QDialog):
         if folder:
             self.folder_path_label.setText(folder)
             self.selected_directory = folder
-            self.number_of_files = len(list(Path(self.selected_directory).rglob('*.txm')))
-            # Calculate memory per worker and initialize Dask here
-            memory_per_worker = AVAILABLE_MEMORY / self.number_of_files
-            print(f"Number of files to process: {self.number_of_files}")
-            print(f'Memory per worker: {round(memory_per_worker / 1e6, 0)} MB')
-            logging.info(f"Number of files to process: {self.number_of_files}")
-            logging.info(f'Memory per worker: {round(memory_per_worker / 1e6, 0)} MB')
+            txm_files_in_folder = list(Path(self.selected_directory).rglob('*.txm'))
+            self.number_of_files = len(txm_files_in_folder)
 
-        cluster = LocalCluster(
-            processes=True,
-            n_workers=self.number_of_files,
-            threads_per_worker=1,
-            memory_limit=memory_per_worker,
-        )
-        self.dask_client = Client(cluster)
-        QCoreApplication.instance().dask_client = self.dask_client
+            self.max_file_size = 0
+            if txm_files_in_folder:
+                self.max_file_size = max(f.stat().st_size for f in txm_files_in_folder)
+
+            if self.number_of_files == 0:
+                QMessageBox.warning(self, "No TXM Files", "No .txm files found in the selected folder.")
+                self.dask_client = None
+                return
+        else:
+            self.selected_directory = ""
+            self.number_of_files = 0
+            self.max_file_size = 0
+            self.dask_client = None
+            self.folder_path_label.setText("No input directory selected")
 
     def select_output_base_dir(self):
         """Set the output directory for tiff export."""
@@ -696,6 +715,21 @@ class Window(QDialog):
         """Set the 'convert_to_8bit' flag."""
         self.convert_to_8bit = self.convert_to_8bit_option.isChecked()
 
+    def validate_memory_percentage(self):
+        """Validate the memory percentage input and update the instance variable."""
+        try:
+            value = int(self.memory_input.text())
+            if 5 <= value <= 95:
+                self.memory_percentage = value
+            else:
+                QMessageBox.warning(self, "Invalid Input", "Memory usage must be between 5% and 95%. Using default (90%).")
+                self.memory_input.setText("90")
+                self.memory_percentage = 90
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Please enter a valid integer for memory usage. Using default (90%).")
+            self.memory_input.setText("90")
+            self.memory_percentage = 90
+
     def set_processing_mode(self, index):
         """Set the processing mode based on the combo box selection."""
         self.processing_mode = self.processing_mode_combo.itemText(index)
@@ -707,15 +741,64 @@ class Window(QDialog):
     def start_conversion(self):
         """Start the conversion process in a separate thread."""
         if not self.selected_directory:
-            QMessageBox.warning(self, "Warning", "Please select a folder.")
+            QMessageBox.warning(self, "Warning", "Please select an input folder.")
+            return
+
+        # Recalculate number_of_files and max_file_size just before conversion starts
+        txm_files_in_folder = list(Path(self.selected_directory).rglob('*.txm'))
+        self.number_of_files = len(txm_files_in_folder)
+        self.max_file_size = 0
+        if txm_files_in_folder:
+            self.max_file_size = max(f.stat().st_size for f in txm_files_in_folder)
+
+        if self.number_of_files == 0:
+            QMessageBox.warning(self, "No TXM Files", "No .txm files found in the selected input folder. Please select a folder containing .txm files.")
             return
 
         if not self.selected_output_base_directory:
             QMessageBox.warning(self, "Warning", "Please select an output directory.")
             return
 
-        if self.dask_client is None:
-            QMessageBox.critical(self, "Error", "Dask client is not initialized. Please select a folder.")
+        # Initialize Dask client here, ensuring memory calculation is up-to-date
+        total_memory_to_use = AVAILABLE_MEMORY * (self.memory_percentage / 100)
+        memory_per_worker = total_memory_to_use / max(1, self.number_of_files)
+
+        print(f"Selected RAM: {round(total_memory_to_use/1e6, 0)} MB of {round(AVAILABLE_MEMORY/1e6, 0)} MB')")
+        print(f"Number of files to process: {self.number_of_files}")
+        print(f'Largest file size: {round(self.max_file_size / 1e6, 2)} MB')
+        print(f"Memory per worker: {round(memory_per_worker / 1e6, 0)} MB")
+        logging.info(f"Selected RAM: {round(total_memory_to_use/1e6, 0)} MB of {round(AVAILABLE_MEMORY/1e6, 0)} MB')")
+        logging.info(f"Number of files to process: {self.number_of_files}")
+        logging.info(f'Largest file size: {round(self.max_file_size / 1e6, 2)} MB')
+        logging.info(f"Memory per worker: {round(memory_per_worker / 1e6, 0)} MB")
+
+        # Check if memory per worker is sufficient for the largest file
+        if memory_per_worker < (self.max_file_size * 2):
+            QMessageBox.critical(
+                self,
+                "Memory Error",
+                f"Calculated memory per worker ({round(memory_per_worker / 1e6, 2)} MB) "
+                f"is less than twice the largest file size ({round(self.max_file_size / 1e6, 2)} MB). "
+                "Please increase the memory usage percentage or reduce the number of files or use serial processing."
+            )
+            return
+
+        try:
+            # Close existing client if it exists to re-initialize with new memory settings
+            if self.dask_client:
+                close_dask_client(self.dask_client)
+
+            cluster = LocalCluster(
+                processes=True,
+                n_workers=self.number_of_files,
+                threads_per_worker=1,
+                memory_limit=memory_per_worker,
+            )
+            self.dask_client = Client(cluster)
+            QCoreApplication.instance().dask_client = self.dask_client
+        except Exception as e:
+            QMessageBox.critical(self, "Dask Client Error", f"Failed to initialize Dask client: {e}")
+            logging.error(f"Failed to initialize Dask client: {e}")
             return
 
         self.progress_bar.setValue(0)
@@ -757,9 +840,12 @@ class Window(QDialog):
             value (int): The current progress value (number of files processed).
             filename (str): The name of the currently processed file.
         """
-        progress_percentage = int((value / self.number_of_files) * 100)
-        self.progress_bar.setValue(progress_percentage)
-        self.setWindowTitle(f"Processing: {filename}")
+        if self.number_of_files > 0:
+            progress_percentage = int((value / self.number_of_files) * 100)
+            self.progress_bar.setValue(progress_percentage)
+            self.setWindowTitle(f"Processing: {filename}")
+        else:
+            self.progress_bar.setValue(0)
 
     def update_text_output(self, message):
         """Update the text output with a new message."""
@@ -804,14 +890,19 @@ class Window(QDialog):
         self.dialog_buttons.setEnabled(True)
         QMessageBox.critical(self, "Error", f"An error occurred: {message}")
         close_dask_client(self.dask_client)
-        self.worker_thread.quit()
-        self.worker_thread.wait()
+        if self.worker_thread:
+            self.worker_thread.quit()
+            self.worker_thread.wait()
 
     def closeEvent(self, event):
         """Ensure the worker thread is stopped before the dialog is closed."""
         if self.worker_thread and self.worker_thread.isRunning():
+            self.worker_thread.stop()
             self.worker_thread.quit()
-            self.worker_thread.wait()
+            self.worker_thread.wait(2000)
+            if self.worker_thread.isRunning():
+                self.worker_thread.terminate()
+                print("Worker thread forcefully terminated.")
         close_dask_client(self.dask_client)
         event.accept()
 
